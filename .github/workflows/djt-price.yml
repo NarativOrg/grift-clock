@@ -1,0 +1,39 @@
+name: Update DJT price
+on:
+  schedule:
+    - cron: '15 21 * * 1-5'   # 21:15 UTC ≈ shortly after 4 PM ET close (5:15 PM during EDT)
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch DJT close and update data/djt.json
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, datetime
+          req = urllib.request.Request(
+              "https://query1.finance.yahoo.com/v8/finance/chart/DJT?range=5d&interval=1d",
+              headers={"User-Agent": "Mozilla/5.0"})
+          d = json.load(urllib.request.urlopen(req))
+          r = d["chart"]["result"][0]
+          closes = [(ts, c) for ts, c in zip(r["timestamp"], r["indicators"]["quote"][0]["close"]) if c]
+          (ts, close), (pts, prev) = closes[-1], closes[-2]
+          out = json.load(open("data/djt.json"))
+          out.update({
+              "date": datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d"),
+              "close": round(close, 2),
+              "prevClose": round(prev, 2),
+          })
+          json.dump(out, open("data/djt.json", "w"), indent=2)
+          print(out)
+          PY
+      - name: Commit if changed
+        run: |
+          git config user.name "grift-clock-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/djt.json
+          git diff --cached --quiet || git commit -m "DJT close $(date -u +%F)"
+          git push
